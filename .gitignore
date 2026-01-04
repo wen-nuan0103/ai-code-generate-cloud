@@ -1,5 +1,6 @@
 ### CUSTOM ###
 application-local.yml
+**/src/main/**/tmp/
 
 target/
 !.mvn/wrapper/maven-wrapper.jar
