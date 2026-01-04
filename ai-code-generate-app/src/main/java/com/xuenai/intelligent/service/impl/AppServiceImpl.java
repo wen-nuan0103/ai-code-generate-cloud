@@ -1,0 +1,364 @@
+package com.xuenai.intelligent.service.impl;
+
+import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.io.FileUtil;
+import cn.hutool.core.util.RandomUtil;
+import cn.hutool.core.util.StrUtil;
+import com.mybatisflex.core.paginate.Page;
+import com.mybatisflex.core.query.QueryWrapper;
+import com.mybatisflex.spring.service.impl.ServiceImpl;
+import com.xuenai.intelligent.ai.builder.VueProjectBuilder;
+import com.xuenai.intelligent.ai.core.AiCodeGenerateFacade;
+import com.xuenai.intelligent.ai.handler.StreamHandlerExecutor;
+import com.xuenai.intelligent.ai.mode.result.ProjectInfoResult;
+import com.xuenai.intelligent.ai.service.AiCodeGenerateTypeRoutingService;
+import com.xuenai.aicodegenerate.constant.AppConstant;
+import com.xuenai.aicodegenerate.exception.BusinessException;
+import com.xuenai.aicodegenerate.exception.ErrorCode;
+import com.xuenai.aicodegenerate.exception.ThrowUtils;
+import com.xuenai.intelligent.langgraph.graph.CodeGenerateConcurrentWorkflow;
+import com.xuenai.intelligent.mapper.AppMapper;
+import com.xuenai.aicodegenerate.model.dto.app.AppAddRequest;
+import com.xuenai.aicodegenerate.model.dto.app.AppQueryRequest;
+import com.xuenai.aicodegenerate.model.entity.App;
+import com.xuenai.aicodegenerate.model.entity.User;
+import com.xuenai.aicodegenerate.model.enums.AppDeployStatusEnum;
+import com.xuenai.aicodegenerate.model.enums.ChatHistoryMessageTypeEnum;
+import com.xuenai.aicodegenerate.model.enums.CodeGenerateTypeEnum;
+import com.xuenai.aicodegenerate.model.vo.app.AppVO;
+import com.xuenai.aicodegenerate.model.vo.user.UserVO;
+import com.xuenai.aicodegenerate.monitor.MonitorContext;
+import com.xuenai.aicodegenerate.monitor.MonitorContextHolder;
+import com.xuenai.intelligent.service.AppService;
+import com.xuenai.intelligent.service.ChatHistoryService;
+import com.xuenai.aicodegenerate.innerservice.InnerScreenshotService;
+import com.xuenai.aicodegenerate.innerservice.InnerUserService;
+import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+
+import java.io.File;
+import java.io.Serializable;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * 应用 服务层实现。
+ *
+ * @author 小菜
+ */
+@Slf4j
+@Service
+public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppService {
+    
+    @Resource
+    private AiCodeGenerateFacade aiCodeGenerateFacade;
+
+    @Resource
+    private AiCodeGenerateTypeRoutingService aiCodeGenerateTypeRoutingService;
+
+    @Lazy
+    @Resource
+    private InnerUserService userService;
+
+    @Resource
+    private ChatHistoryService chatHistoryService;
+    
+    @Lazy
+    @Resource
+    private InnerScreenshotService screenshotService;
+    
+    @Resource
+    private CodeGenerateConcurrentWorkflow codeGenerateConcurrentWorkflow;
+
+    @Resource
+    private StreamHandlerExecutor streamHandlerExecutor;
+
+    @Resource
+    private VueProjectBuilder vueProjectBuilder;
+
+
+    @Override
+    public Flux<String> chatToGenerateCode(Long appId, String message, User loginUser) {
+        ThrowUtils.throwIf(appId == null || appId < 0, ErrorCode.PARAMS_ERROR, "应用 ID 错误");
+        ThrowUtils.throwIf(message == null, ErrorCode.PARAMS_ERROR, "提示词不能为空");
+
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!Objects.equals(app.getUserId(), loginUser.getId()), ErrorCode.NO_AUTH_ERROR, "无权限操作该应用");
+
+        String type = app.getCodeGeneratorType();
+        CodeGenerateTypeEnum generatorTypeEnum = CodeGenerateTypeEnum.getEnumByValue(type);
+        ThrowUtils.throwIf(generatorTypeEnum == null, ErrorCode.PARAMS_ERROR, "应用代码生成类型错误");
+
+        long historyCount = chatHistoryService.countByAppId(appId);
+        chatHistoryService.createChatHistory(appId, loginUser.getId(), message, ChatHistoryMessageTypeEnum.USER.getValue());
+
+        MonitorContextHolder.setContext(
+                MonitorContext.builder()
+                        .userId(String.valueOf(loginUser.getId()))
+                        .appId(String.valueOf(appId))
+                        .build()
+        );
+        
+        boolean isFirstCreation = (historyCount == 0);
+        
+        if (isFirstCreation) {
+            Flux<String> workflowFlux = codeGenerateConcurrentWorkflow.executeWorkflowFlux(appId, message);
+            return streamHandlerExecutor.doExecuteWorkflow(workflowFlux, chatHistoryService, appId, loginUser)
+                    .doFinally(signalType -> {
+                        MonitorContextHolder.clearContext();
+                    });
+        } else {
+            Flux<String> stream = aiCodeGenerateFacade.generateStreamAndSaveCode(message, generatorTypeEnum, appId);
+            return streamHandlerExecutor.doExecute(stream, chatHistoryService, appId, loginUser, generatorTypeEnum)
+                    .doFinally(signalType -> {
+                        MonitorContextHolder.clearContext();
+                    });
+        }
+    }
+
+    @Override
+    public String deployApp(Long appId, User loginUser) {
+        ThrowUtils.throwIf(appId == null || appId < 0, ErrorCode.PARAMS_ERROR, "应用 ID 错误");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR, "用户未登录");
+
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(!Objects.equals(app.getUserId(), loginUser.getId()), ErrorCode.NO_AUTH_ERROR, "无权限操作该应用");
+
+        String deployKey = app.getDeployKey();
+        if (StrUtil.isBlank(deployKey)) {
+            deployKey = RandomUtil.randomString(6);
+        }
+
+        String type = app.getCodeGeneratorType();
+        String sourceDirName = String.format("%s_%s", type, appId);
+        String sourceDirPath = AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + sourceDirName;
+        File sourceDir = new File(sourceDirPath);
+        ThrowUtils.throwIf(!sourceDir.exists() || !sourceDir.isDirectory(), ErrorCode.SYSTEM_ERROR, "代码生成目录不存在");
+        CodeGenerateTypeEnum generateType = CodeGenerateTypeEnum.getEnumByValue(app.getCodeGeneratorType());
+        if (generateType.equals(CodeGenerateTypeEnum.VUE_PROJECT)) {
+            boolean buildSuccess = vueProjectBuilder.buildProject(sourceDirPath);
+            ThrowUtils.throwIf(!buildSuccess, ErrorCode.SYSTEM_ERROR, "项目构建失败");
+            File distDir = new File(sourceDirPath, "dist");
+            ThrowUtils.throwIf(!distDir.exists() || !distDir.isDirectory(), ErrorCode.SYSTEM_ERROR, "项目构建失败");
+            sourceDir = distDir;
+            log.info("项目构建成功,将部署 dist 目录 :{}", distDir.getAbsolutePath());
+        }
+        String deployDir = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
+        try {
+            FileUtil.copyContent(sourceDir, new File(deployDir), true);
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "部署失败: " + e.getMessage());
+        }
+        App reviseApp = new App();
+        reviseApp.setId(appId);
+        reviseApp.setDeployKey(deployKey);
+        reviseApp.setDeployStatus(AppDeployStatusEnum.DEPLOYED.getValue());
+        reviseApp.setDeployedTime(LocalDateTime.now());
+        boolean result = this.updateById(reviseApp);
+        if (!result) {
+            App temp = new App();
+            temp.setId(appId);
+            temp.setDeployStatus(AppDeployStatusEnum.DEPLOY_FAIL.getValue());
+            this.updateById(temp);
+            ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
+        }
+        
+        String deployUrl = String.format("%s/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        generateAppScreenshotAsync(appId, deployUrl);
+        return deployUrl;
+    }
+
+    @Override
+    public void validApp(App app, boolean add) {
+        if (app == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        String initPrompt = app.getInitPrompt();
+
+        // 创建时，参数不能为空
+        if (add) {
+            ThrowUtils.throwIf(StrUtil.isBlank(initPrompt), ErrorCode.PARAMS_ERROR, "应用初始化提示词不能为空");
+        }
+        if (StrUtil.isNotBlank(initPrompt) && initPrompt.length() > 8192) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用初始化提示词过长");
+        }
+    }
+
+    @Override
+    public long createApp(AppAddRequest appAddRequest, User loginUser) {
+        ThrowUtils.throwIf(appAddRequest == null, ErrorCode.PARAMS_ERROR);
+
+        App app = new App();
+        BeanUtil.copyProperties(appAddRequest, app);
+
+        this.validApp(app, true);
+        String initPrompt = appAddRequest.getInitPrompt();
+        CodeGenerateTypeEnum codeType = aiCodeGenerateTypeRoutingService.generateRouteCodeType(initPrompt);
+        app.setCodeGeneratorType(codeType.getValue());
+        app.setUserId(loginUser.getId());
+
+        app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
+        boolean result = this.save(app);
+
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        asyncGenerateProjectInfo(app);
+
+        return app.getId();
+    }
+
+    @Override
+    public QueryWrapper getQueryWrapper(AppQueryRequest appQueryRequest) {
+        QueryWrapper queryWrapper = QueryWrapper.create();
+        if (appQueryRequest == null) {
+            return queryWrapper;
+        }
+        Long id = appQueryRequest.getId();
+        String appName = appQueryRequest.getAppName();
+        String cover = appQueryRequest.getCover();
+        String initPrompt = appQueryRequest.getInitPrompt();
+        String codeGeneratorType = appQueryRequest.getCodeGeneratorType();
+        String deployKey = appQueryRequest.getDeployKey();
+        Integer deployStatus = appQueryRequest.getDeployStatus();
+        Integer priority = appQueryRequest.getPriority();
+        Long userId = appQueryRequest.getUserId();
+        Integer currentStatus = appQueryRequest.getCurrentStatus();
+        Long version = appQueryRequest.getVersion();
+        String sortField = appQueryRequest.getSortField();
+        String sortOrder = appQueryRequest.getSortOrder();
+
+        queryWrapper.eq("id", id).like("app_name", appName).like("cover", cover).like("init_prompt", initPrompt).eq("code_generator_type", codeGeneratorType).eq("deploy_key", deployKey).eq("priority", priority).eq("deploy_key", deployKey).eq("deploy_status", deployStatus).eq("priority", priority).eq("current_status", currentStatus).eq("version", version).eq("user_id", userId).orderBy(sortField, "ascend".equals(sortOrder));
+        return queryWrapper;
+    }
+
+    @Override
+    public AppVO getAppVO(App app) {
+        AppVO appVO = getVo(app);
+        Long userId = app.getUserId();
+        if (userId != null) {
+            User user = userService.getById(userId);
+            appVO.setUser(userService.getUserVO(user));
+        }
+        return appVO;
+    }
+
+    @Override
+    public Page<AppVO> getAppVOPage(Page<App> appPage, boolean isMyApp) {
+        List<App> appList = appPage.getRecords();
+        Page<AppVO> appVOPage = new Page<>(appPage.getPageNumber(), appPage.getPageSize(), appPage.getTotalRow());
+        if (CollUtil.isEmpty(appList)) {
+            return appVOPage;
+        }
+        List<AppVO> appVOList = null;
+        if (isMyApp) {
+            appVOList = appList.stream().map(this::getVo).collect(Collectors.toList());
+        } else {
+            Set<Long> userIds = appList.stream().map(App::getUserId).collect(Collectors.toSet());
+            Map<Long, UserVO> userVOMap = userService.listByIds(userIds).stream().collect(Collectors.toMap(User::getId, userService::getUserVO));
+            appVOList = appList.stream().map(app -> {
+                AppVO appVO = getVo(app);
+                UserVO userVO = userVOMap.get(app.getUserId());
+                appVO.setUser(userVO);
+                return appVO;
+            }).collect(Collectors.toList());
+        }
+        appVOPage.setRecords(appVOList);
+        return appVOPage;
+    }
+
+    @Override
+    public Page<AppVO> listMyAppVOByPage(AppQueryRequest appQueryRequest, User loginUser) {
+        if (loginUser == null) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+        }
+        appQueryRequest.setUserId(loginUser.getId());
+        long pageNum = appQueryRequest.getPageNum();
+        long pageSize = appQueryRequest.getPageSize();
+        // 限制爬虫
+        ThrowUtils.throwIf(pageSize > 20, ErrorCode.PARAMS_ERROR);
+        Page<App> appPage = this.page(Page.of(pageNum, pageSize), this.getQueryWrapper(appQueryRequest));
+        return this.getAppVOPage(appPage, true);
+    }
+
+    @Override
+    public Page<AppVO> listAppVOByPage(AppQueryRequest appQueryRequest) {
+        long pageNum = appQueryRequest.getPageNum();
+        long pageSize = appQueryRequest.getPageSize();
+        // 限制爬虫
+        ThrowUtils.throwIf(pageSize > 20, ErrorCode.PARAMS_ERROR);
+        // 查询精选应用（优先级大于0的应用）
+        appQueryRequest.setPriority(AppConstant.GOOD_APP_PRIORITY);
+        QueryWrapper queryWrapper = this.getQueryWrapper(appQueryRequest);
+        Page<App> appPage = this.page(Page.of(pageNum, pageSize), queryWrapper);
+        return this.getAppVOPage(appPage, false);
+    }
+
+    @Override
+    public void generateAppScreenshotAsync(Long appId, String appUrl) {
+        Thread.startVirtualThread(() -> {
+            String url = screenshotService.generateAndSaveScreenshot(appUrl);
+            App reviseApp = new App();
+            reviseApp.setId(appId);
+            reviseApp.setCover(url);
+            boolean result = this.updateById(reviseApp);
+            ThrowUtils.throwIf(!result,ErrorCode.OPERATION_ERROR,"更新应用封面失败");
+        });
+    }
+
+    @Override
+    public boolean removeById(Serializable id) {
+        if (id == null) return false;
+        long appId = Long.parseLong(id.toString());
+        if (appId <= 0) return false;
+
+        try {
+            chatHistoryService.deleteByAppId(appId);
+        } catch (Exception e) {
+            log.error("删除应用历史记录失败（应用 ID 为:{}）: {}", appId, e.getMessage());
+        }
+
+        return super.removeById(id);
+    }
+
+    /**
+     * 返回应用VO（不包含用户信息）
+     *
+     * @param app 应用
+     * @return 应用VO
+     */
+    private AppVO getVo(App app) {
+        if (app == null) {
+            return null;
+        }
+        AppVO appVO = new AppVO();
+        BeanUtil.copyProperties(app, appVO);
+        return appVO;
+    }
+
+    /**
+     * 虚拟线程异步创建项目信息
+     *
+     * @param app 应用信息
+     */
+    private void asyncGenerateProjectInfo(App app) {
+        Thread.startVirtualThread(() -> {
+            String userMessage = app.getInitPrompt();
+            ProjectInfoResult info = aiCodeGenerateFacade.generateProjectInfo(app.getId(), userMessage);
+            ThrowUtils.throwIf(info == null, ErrorCode.SYSTEM_ERROR, "生成项目信息失败");
+            App reviseApp = new App();
+            reviseApp.setId(app.getId());
+            reviseApp.setAppName(info.getName());
+            reviseApp.setTags(info.getTags());
+            this.updateById(reviseApp);
+        });
+    }
+}

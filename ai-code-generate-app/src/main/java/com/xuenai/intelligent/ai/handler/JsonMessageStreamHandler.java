@@ -1,0 +1,108 @@
+package com.xuenai.intelligent.ai.handler;
+
+import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
+import com.xuenai.intelligent.ai.builder.VueProjectBuilder;
+import com.xuenai.intelligent.ai.mode.message.AiResponseMessage;
+import com.xuenai.intelligent.ai.mode.message.StreamMessage;
+import com.xuenai.intelligent.ai.mode.message.ToolExecutedMessage;
+import com.xuenai.intelligent.ai.mode.message.ToolRequestMessage;
+import com.xuenai.intelligent.ai.tools.BaseTool;
+import com.xuenai.intelligent.ai.tools.ToolManage;
+import com.xuenai.aicodegenerate.constant.AppConstant;
+import com.xuenai.aicodegenerate.model.entity.User;
+import com.xuenai.aicodegenerate.model.enums.ChatHistoryMessageTypeEnum;
+import com.xuenai.aicodegenerate.model.enums.StreamMessageTypeEnum;
+import com.xuenai.intelligent.service.ChatHistoryService;
+import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
+
+import java.util.HashSet;
+import java.util.Set;
+
+/**
+ * JSON 消息流处理器
+ * 处理 VUE_PROJECT 类型的复杂流式响应，包含工具调用信息
+ */
+@Slf4j
+@Component
+public class JsonMessageStreamHandler {
+    
+    @Resource
+    private ToolManage toolManage;
+    
+    @Resource
+    private VueProjectBuilder vueProjectBuilder;
+
+    /**
+     * 处理 TokenStream（VUE_PROJECT）
+     * 解析 JSON 消息并重组为完整的响应格式
+     *
+     * @param originFlux         原始流
+     * @param chatHistoryService 聊天历史服务
+     * @param appId              应用ID
+     * @param loginUser          登录用户
+     * @return 处理后的流
+     */
+    public Flux<String> handle(Flux<String> originFlux, ChatHistoryService chatHistoryService, long appId, User loginUser) {
+        StringBuilder chatHistoryStringBuilder = new StringBuilder();
+        Set<String> seenToolIds = new HashSet<>();
+        return originFlux.map(chunk -> handleJsonMessageChunk(chunk, chatHistoryStringBuilder, seenToolIds)).filter(StrUtil::isNotEmpty)
+                .doOnComplete(() -> {
+                    String aiResponse = chatHistoryStringBuilder.toString();
+                    chatHistoryService.createChatHistory(appId, loginUser.getId(), aiResponse, ChatHistoryMessageTypeEnum.AI.getValue());
+                    String projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + "/vue_project_" + appId;
+                    vueProjectBuilder.buildProjectAsync(projectPath);
+                }).doOnError(error -> {
+                    String errorMessage = "AI回复失败: " + error.getMessage();
+                    chatHistoryService.createChatHistory(appId, loginUser.getId(), errorMessage, ChatHistoryMessageTypeEnum.AI.getValue());
+                });
+    }
+
+    /**
+     * 解析并收集 TokenStream 数据
+     */
+    private String handleJsonMessageChunk(String chunk, StringBuilder chatHistoryStringBuilder, Set<String> seenToolIds) {
+        // 解析 JSON
+        StreamMessage streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
+        StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
+        switch (typeEnum) {
+            case AI_RESPONSE -> {
+                AiResponseMessage aiMessage = JSONUtil.toBean(chunk, AiResponseMessage.class);
+                String data = aiMessage.getData();
+                chatHistoryStringBuilder.append(data);
+                return data;
+            }
+            case TOOL_REQUEST -> {
+                ToolRequestMessage toolRequestMessage = JSONUtil.toBean(chunk, ToolRequestMessage.class);
+                String toolId = toolRequestMessage.getId();
+                String toolName = toolRequestMessage.getName();
+                if (toolId != null && !seenToolIds.contains(toolId)) {
+                    seenToolIds.add(toolId);
+                    BaseTool tool = toolManage.getTool(toolName);
+                    return tool.generateToolRequestResponse();
+                } else {
+                    return "";
+                }
+            }
+            case TOOL_EXECUTED -> {
+                ToolExecutedMessage toolExecutedMessage = JSONUtil.toBean(chunk, ToolExecutedMessage.class);
+                JSONObject jsonObject = JSONUtil.parseObj(toolExecutedMessage.getArguments());
+                String toolName = toolExecutedMessage.getName();
+                BaseTool tool = toolManage.getTool(toolName);
+                String result = tool.generateToolExecutedResult(jsonObject);
+                String output = String.format("\n\n%s\n\n", result);
+                chatHistoryStringBuilder.append(output);
+                return output;
+            }
+            default -> {
+                log.error("不支持的消息类型: {}", typeEnum);
+                return "";
+            }
+        }
+    }
+}
+

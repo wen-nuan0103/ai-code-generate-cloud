@@ -3,6 +3,7 @@ package com.xuenai.intelligent.ai.config;
 
 import com.xuenai.intelligent.ai.config.properties.AiModelProperties;
 import com.xuenai.intelligent.ai.config.properties.GeminiModelProperties;
+import com.xuenai.intelligent.monitor.listener.AiModelMonitorListener;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -11,6 +12,8 @@ import jakarta.annotation.Resource;
 import lombok.Data;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
 
 /**
  * 核心模型 Bean 注册中心
@@ -36,8 +39,8 @@ public class AiModelConfig {
     private AiModelProperties aiModelProperties;
     @Resource
     private GeminiModelProperties geminiModelProperties;
-//    @Resource
-//    private AiModelMonitorListener aiModelMonitorListener;
+    @Resource
+    private AiModelMonitorListener aiModelMonitorListener;
     
     
     @Bean("routingChatModel")
@@ -82,7 +85,7 @@ public class AiModelConfig {
                 .temperature(config.getTemperature())
                 .logRequests(config.getLogRequests())
                 .logResponses(config.getLogResponses())
-//                .listeners(List.of(aiModelMonitorListener))
+                .listeners(List.of(aiModelMonitorListener))
                 .build();
     }
 
@@ -102,7 +105,7 @@ public class AiModelConfig {
                 .temperature(config.getTemperature())
                 .logRequests(config.getLogRequests())
                 .logResponses(config.getLogResponses())
-//                .listeners(List.of(aiModelMonitorListener))
+                .listeners(List.of(aiModelMonitorListener))
                 .build();
     }
 

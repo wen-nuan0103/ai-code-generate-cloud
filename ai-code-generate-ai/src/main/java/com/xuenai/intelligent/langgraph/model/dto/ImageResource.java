@@ -1,6 +1,6 @@
 package com.xuenai.intelligent.langgraph.model.dto;
 
-import com.xuenai.aicodegenerate.langgraph.model.enums.ImageCategoryEnum;
+import com.xuenai.intelligent.langgraph.model.enums.ImageCategoryEnum;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

@@ -42,6 +42,15 @@
             <artifactId>langgraph4j-core</artifactId>
             <version>1.6.0-rc2</version>
         </dependency>
+        <!-- prometheus 监控 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.xuenai</groupId>
             <artifactId>ai-code-generate-common</artifactId>

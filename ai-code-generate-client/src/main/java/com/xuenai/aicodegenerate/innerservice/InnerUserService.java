@@ -3,6 +3,7 @@ package com.xuenai.aicodegenerate.innerservice;
 import com.xuenai.aicodegenerate.exception.BusinessException;
 import com.xuenai.aicodegenerate.exception.ErrorCode;
 import com.xuenai.aicodegenerate.model.entity.User;
+import com.xuenai.aicodegenerate.model.enums.UserRoleEnum;
 import com.xuenai.aicodegenerate.model.vo.user.UserVO;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -31,6 +32,11 @@ public interface InnerUserService {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
         return currentUser;
+    }
+
+    static boolean isAdmin(HttpServletRequest request) {
+        User user = getLoginUser(request);
+        return UserRoleEnum.ADMIN.getValue().equals(user.getRole());
     }
 }
 

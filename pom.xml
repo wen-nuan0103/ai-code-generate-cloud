@@ -16,6 +16,7 @@
         <module>ai-code-generate-client</module>
         <module>ai-code-generate-user</module>
         <module>ai-code-generate-screenshot</module>
+        <module>ai-code-generate-ratelimit</module>
     </modules>
 
     <properties>

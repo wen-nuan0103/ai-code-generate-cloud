@@ -1,0 +1,37 @@
+package com.xuenai.intelligent.langgraph.node.concurrent;
+
+import com.xuenai.intelligent.ai.service.ImageCollectionPlanService;
+import com.xuenai.intelligent.langgraph.model.dto.ImageCollectionPlan;
+import com.xuenai.intelligent.langgraph.state.WorkflowContext;
+import com.xuenai.aicodegenerate.utils.SpringContextUtil;
+import lombok.extern.slf4j.Slf4j;
+import org.bsc.langgraph4j.action.AsyncNodeAction;
+import org.bsc.langgraph4j.prebuilt.MessagesState;
+
+import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
+
+/**
+ * 图片计划节点
+ */
+@Slf4j
+public class ImagePlanNode {
+
+    public static AsyncNodeAction<MessagesState<String>> create() {
+        return node_async(state -> {
+            WorkflowContext context = WorkflowContext.getContext(state);
+            String originalPrompt = context.getOriginalPrompt();
+            try {
+                // 获取图片收集计划服务
+                ImageCollectionPlanService planService = SpringContextUtil.getBean(ImageCollectionPlanService.class);
+                ImageCollectionPlan plan = planService.planImageCollection(originalPrompt);
+                log.info("生成图片收集计划，准备启动并发分支");
+                context.setImageCollectionPlan(plan);
+                context.setCurrentStep("图片计划");
+            } catch (Exception e) {
+                log.error("图片计划生成失败: {}", e.getMessage(), e);
+            }
+            return WorkflowContext.saveContext(context);
+        });
+    }
+}
+

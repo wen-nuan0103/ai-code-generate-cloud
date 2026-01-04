@@ -11,6 +11,8 @@
     <file url="file://$PROJECT_DIR$/ai-code-generate-common/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ai-code-generate-model/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ai-code-generate-model/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ai-code-generate-ratelimit/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ai-code-generate-ratelimit/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ai-code-generate-screenshot/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ai-code-generate-screenshot/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/ai-code-generate-user/src/main/java" charset="UTF-8" />
