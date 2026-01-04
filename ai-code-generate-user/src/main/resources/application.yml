@@ -1,0 +1,48 @@
+server:
+  port: 8124
+  servlet:
+    context-path: /api
+    session:
+      cookie:
+        max-age: 2592000
+spring:
+  application:
+    name: ai-code-user
+  profiles:
+    active: local
+  threads:
+    virtual:
+      enabled: true
+  session:
+    store-type: redis
+    # 30天
+    timeout: 2592000
+  # mysql
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:13306/ai_auto_generate?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC
+    username: root
+    password: root
+  data:
+    redis:
+      host: localhost
+      password:
+      port: 6379
+      db: 1
+      ttl: 3600
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: admin
+    password: admin
+# springdoc-openapi项目配置
+springdoc:
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.xuenai.user.controller
+# knife4j的增强配置
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
