@@ -1,0 +1,13 @@
+server:
+  port: 8127
+  servlet:
+    context-path: /api
+spring:
+  application:
+    name: ai-code-screenshot
+  profiles:
+    active: local
+screenshot:
+  pool-size: 5
+  browser-width: 1600
+  browser-height: 900
