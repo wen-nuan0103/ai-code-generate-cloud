@@ -49,6 +49,15 @@
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Dubbo -->
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-nacos-spring-boot-starter</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.xuenai</groupId>
             <artifactId>ai-code-generate-common</artifactId>
@@ -57,6 +66,11 @@
         <dependency>
             <groupId>com.xuenai</groupId>
             <artifactId>ai-code-generate-model</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.xuenai</groupId>
+            <artifactId>ai-code-generate-client</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
     </dependencies>

@@ -32,8 +32,7 @@ public class UserController {
 
     @Resource
     private UserService userService;
-
-
+    
     /**
      * 用户注册
      * @param request 注册请求体

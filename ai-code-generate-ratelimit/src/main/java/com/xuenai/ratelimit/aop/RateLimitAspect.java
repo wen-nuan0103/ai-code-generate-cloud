@@ -5,6 +5,7 @@ import com.xuenai.aicodegenerate.exception.ErrorCode;
 import com.xuenai.aicodegenerate.exception.ThrowUtils;
 import com.xuenai.aicodegenerate.innerservice.InnerUserService;
 import com.xuenai.aicodegenerate.model.entity.User;
+import com.xuenai.ratelimit.annotation.RateLimit;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.JoinPoint;

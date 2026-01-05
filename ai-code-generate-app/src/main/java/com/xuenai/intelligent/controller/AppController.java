@@ -231,7 +231,7 @@ public class AppController {
             value = "good_app_page",
             // SPEL 表达式
             key = "T(com.xuenai.aicodegenerate.utils.CacheKeyUtil).generateKey(#appQueryRequest)",
-            condition = "#appQueryRequest.pageNum <= 10"
+            unless = "#appQueryRequest.pageNum <= 10"
     )
     @PostMapping("/list/page/vo")
     public BaseResponse<Page<AppVO>> listAppVOByPage(@RequestBody AppQueryRequest appQueryRequest) {

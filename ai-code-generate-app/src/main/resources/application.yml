@@ -30,6 +30,20 @@ spring:
       port: 6379
       db: 1
       ttl: 3600
+# Dubbo
+dubbo:
+  application:
+    qos-enable: false
+  registry:
+    address: nacos://127.0.0.1:8848?username=nacos&password=nacos
+    register-mode: instance
+  protocol:
+    name: tri
+    port: 50053
+  consumer:
+    timeout: 120000
+  provider:
+    timeout: 120000
 # springdoc-openapi项目配置
 springdoc:
   group-configs:
@@ -41,3 +55,21 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+# 暴露监控端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+# mybatis-flex
+mybatis-flex:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+logging:
+  charset:
+    console: UTF-8
+  level:
+    dev.langchain4j: DEBUG

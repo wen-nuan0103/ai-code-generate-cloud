@@ -28,15 +28,15 @@ import com.xuenai.aicodegenerate.model.enums.ChatHistoryMessageTypeEnum;
 import com.xuenai.aicodegenerate.model.enums.CodeGenerateTypeEnum;
 import com.xuenai.aicodegenerate.model.vo.app.AppVO;
 import com.xuenai.aicodegenerate.model.vo.user.UserVO;
-import com.xuenai.aicodegenerate.monitor.MonitorContext;
-import com.xuenai.aicodegenerate.monitor.MonitorContextHolder;
+import com.xuenai.intelligent.monitor.MonitorContext;
+import com.xuenai.intelligent.monitor.MonitorContextHolder;
 import com.xuenai.intelligent.service.AppService;
 import com.xuenai.intelligent.service.ChatHistoryService;
 import com.xuenai.aicodegenerate.innerservice.InnerScreenshotService;
 import com.xuenai.aicodegenerate.innerservice.InnerUserService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Lazy;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -64,15 +64,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private AiCodeGenerateTypeRoutingService aiCodeGenerateTypeRoutingService;
 
-    @Lazy
-    @Resource
+    @DubboReference
     private InnerUserService userService;
 
     @Resource
     private ChatHistoryService chatHistoryService;
-    
-    @Lazy
-    @Resource
+
+    @DubboReference
     private InnerScreenshotService screenshotService;
     
     @Resource
